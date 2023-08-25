@@ -3,6 +3,7 @@
 {
   # https://devenv.sh/basics/
   env.GREET = "devenv";
+  env.MOZ_REMOTE_SETTINGS_DEVTOOLS=1;
 
   # https://devenv.sh/packages/
   packages = [ pkgs.git pkgs.geckodriver pkgs.firefox ];

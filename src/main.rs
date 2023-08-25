@@ -1,19 +1,17 @@
 use fantoccini::{wd::Capabilities, ClientBuilder, Locator};
+use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), fantoccini::error::CmdError> {
-    let mut firefox_args = serde_json::Map::new();
-    firefox_args.insert(
-        "args".into(),
-        serde_json::Value::Array(vec!["--headless".into(), "".into()]),
-    );
-    let mut prefs = serde_json::Map::new();
-    prefs.insert("javascript.enabled".into(), serde_json::Value::Bool(true));
-    firefox_args.insert("prefs".into(), serde_json::Value::Object(prefs));
     let mut caps = Capabilities::new();
     caps.insert(
         "moz:firefoxOptions".into(),
-        serde_json::Value::Object(firefox_args),
+        json!({
+            "prefs": {
+                "javascript.enabled": true
+            },
+            "args": ["--headless"]
+        }),
     );
     println!("Starting with caps: {caps:?}");
 
