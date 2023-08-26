@@ -1,4 +1,5 @@
 use fantoccini::{cookies::Cookie, wd::Capabilities, Client, ClientBuilder, Locator};
+use regex::Regex;
 use scraper::{Html, Selector};
 use serde_json::json;
 use std::env;
@@ -117,30 +118,35 @@ async fn main() -> Result<(), fantoccini::error::CmdError> {
             .unwrap();
     }
 
-    c.goto("https://twitter.com/jonhoo").await?;
+    let username = "jonhoo";
+    c.goto(&format!("https://twitter.com/{username}")).await?;
     sleep(Duration::from_secs(4)).await;
-    for i in 0..100 {
+
+    let re = Regex::new(&format!("^/\\w+/status/\\d+$")).unwrap();
+    let anchor_selector = &Selector::parse("a").unwrap();
+    for _ in 0..100 {
         c.execute("window.scrollBy(0,300);", vec![]).await?;
         sleep(Duration::from_secs(2)).await;
 
         let s = c.source().await?;
-        let fname = &format!("out/out{i}.html");
-        let mut f = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(fname)
-            .await?;
-        println!("Wrote output to {fname}");
-        f.write_all(s.as_str().as_ref()).await?;
-    }
+        let doc = Html::parse_document(&s);
+        let els = doc
+            .select(&Selector::parse("article").unwrap())
+            .flat_map(|article| article.select(anchor_selector))
+            .filter_map(|e| e.value().attr("href").map(|l| (e, l)))
+            .filter(|(_, l)| re.is_match(l))
+            .collect::<Vec<_>>();
 
-    let mut f = tokio::fs::File::open("out/out0.html").await?;
-    let mut doc = vec![];
-    f.read_to_end(&mut doc).await.unwrap();
-    let doc = String::from_utf8(doc).unwrap();
-    let doc = Html::parse_document(&doc);
-    for el in doc.select(&Selector::parse("article").unwrap()) {
-        println!("{el:?}");
+        for (_, l) in els {
+            // FIXME: This may either a post or a retweet (not a repost)
+            // Posts could be further separate into normal posts,
+            // quote-retweets (not reposts) and comments
+            // However, the main distinction is for retweets,
+            // as these yield the url for the retweeted tweet, as they
+            // do not generate a new "tweet". It is also unclear how
+            // a date for a retwee could be extracted.
+            println!("{}", l);
+        }
     }
 
     c.close().await
