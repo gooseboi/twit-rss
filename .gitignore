@@ -11,3 +11,4 @@ devenv.local.nix
 .pre-commit-config.yaml
 
 result
+cached_auth
