@@ -1,10 +1,9 @@
 use fantoccini::{cookies::Cookie, wd::Capabilities, Client, ClientBuilder, Locator};
+use scraper::{Html, Selector};
 use serde_json::json;
 use std::env;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, Duration};
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
-use sqlx::{Connection, SqliteConnection};
-
 
 async fn auth(c: &Client) -> Result<Vec<Cookie<'static>>, fantoccini::error::CmdError> {
     let username =
@@ -100,14 +99,49 @@ async fn main() -> Result<(), fantoccini::error::CmdError> {
             return Err(e);
         }
 
-        let cookie=res.unwrap().iter().filter(|c| c.name() == "auth_token").last().unwrap().clone();
-        let mut f = tokio::fs::OpenOptions::new().write(true).create(true).open("cached_auth").await.unwrap();
-        f.write_all(cookie.to_string().as_str().as_bytes()).await.unwrap();
+        let cookie = res
+            .unwrap()
+            .iter()
+            .filter(|c| c.name() == "auth_token")
+            .last()
+            .unwrap()
+            .clone();
+        let mut f = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open("cached_auth")
+            .await
+            .unwrap();
+        f.write_all(cookie.to_string().as_str().as_bytes())
+            .await
+            .unwrap();
     }
 
-    sleep(Duration::from_secs(5)).await;
+    c.goto("https://twitter.com/jonhoo").await?;
+    sleep(Duration::from_secs(4)).await;
+    for i in 0..100 {
+        c.execute("window.scrollBy(0,300);", vec![]).await?;
+        sleep(Duration::from_secs(2)).await;
 
+        let s = c.source().await?;
+        let fname = &format!("out/out{i}.html");
+        let mut f = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(fname)
+            .await?;
+        println!("Wrote output to {fname}");
+        f.write_all(s.as_str().as_ref()).await?;
+    }
 
+    let mut f = tokio::fs::File::open("out/out0.html").await?;
+    let mut doc = vec![];
+    f.read_to_end(&mut doc).await.unwrap();
+    let doc = String::from_utf8(doc).unwrap();
+    let doc = Html::parse_document(&doc);
+    for el in doc.select(&Selector::parse("article").unwrap()) {
+        println!("{el:?}");
+    }
 
     c.close().await
 }
