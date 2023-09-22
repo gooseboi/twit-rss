@@ -12,3 +12,4 @@ devenv.local.nix
 
 result
 cached_auth
+.env

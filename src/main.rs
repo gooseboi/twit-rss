@@ -1,3 +1,4 @@
+use color_eyre::eyre::{bail, eyre, Context, Result};
 use fantoccini::{cookies::Cookie, wd::Capabilities, Client, ClientBuilder, Locator};
 use regex::Regex;
 use scraper::{Html, Selector};
@@ -6,23 +7,23 @@ use std::env;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, Duration};
 
-const MAX_LINKS_PER_FETCH: usize = 50;
+const MAX_LINKS_PER_FETCH: usize = 5;
 const AUTH_CACHE_FNAME: &str = "cached_auth";
 
 fn sleep_secs(n: usize) -> tokio::time::Sleep {
     sleep(Duration::from_secs(n as u64))
 }
 
-async fn auth(c: &Client) -> Result<Vec<Cookie<'static>>, fantoccini::error::CmdError> {
-    let username =
-        env::var("TWITTER_USERNAME").expect("Could not load twitter username from environment!");
-    let password =
-        env::var("TWITTER_PASSWORD").expect("Could not load twitter password from environment!");
+async fn auth(c: &Client) -> Result<Vec<Cookie<'static>>> {
+    let username = env::var("TWITTER_USERNAME")
+        .map_err(|_| eyre!("Could not load twitter username from environment!"))?;
+    let password = env::var("TWITTER_PASSWORD")
+        .map_err(|_| eyre!("Could not load twitter password from environment!"))?;
 
     c.goto("https://twitter.com/").await?;
     sleep_secs(5).await;
     if c.source().await?.as_str().contains("This page is down") {
-        panic!("Twitter is down");
+        bail!("Twitter is down");
     }
 
     c.find(Locator::XPath(
@@ -64,10 +65,10 @@ async fn auth(c: &Client) -> Result<Vec<Cookie<'static>>, fantoccini::error::Cmd
     println!("Clicked on the log in button");
     sleep_secs(7).await;
 
-    c.get_all_cookies().await
+    c.get_all_cookies().await.map_err(|e| e.into())
 }
 
-async fn set_auth_cookie(c: &Client) -> Result<(), fantoccini::error::CmdError> {
+async fn set_auth_cookie(c: &Client) -> Result<()> {
     println!("Loading auth");
     let cached = tokio::fs::File::open(AUTH_CACHE_FNAME).await;
     if let Ok(mut f) = cached {
@@ -107,15 +108,13 @@ async fn set_auth_cookie(c: &Client) -> Result<(), fantoccini::error::CmdError> 
 #[derive(Debug)]
 struct Post {
     link: String,
-    date: chrono::DateTime<chrono::offset::Utc>,
+    date: u64,
     text: String,
-    retweeter: Option<String>,
+    repost_link: Option<String>,
+    repost_date: u64,
 }
 
-async fn get_recent_posts_for_user(
-    c: &Client,
-    user_id: &str,
-) -> Result<Vec<Post>, fantoccini::error::CmdError> {
+async fn get_recent_posts_for_user(c: &Client, user_id: &str) -> Result<Vec<Post>> {
     c.goto(&format!("https://twitter.com/{user_id}")).await?;
     sleep_secs(4).await;
     let username = {
@@ -129,10 +128,14 @@ async fn get_recent_posts_for_user(
             })
             .map(|e| e.text().collect::<Vec<_>>().join(" "))
             .next()
-            .unwrap()
+            .ok_or(eyre!("Could not find username element"))?
             .split(" @") // <username> @<user_id>
+            .map(|s| {
+                println!("{s}");
+                s
+            })
             .next()
-            .unwrap()
+            .ok_or(eyre!("Username was not in '<username> @<user_id>'"))?
             .trim()
             .to_owned()
     };
@@ -163,8 +166,11 @@ async fn get_recent_posts_for_user(
             .map(|l| l.to_owned());
 
         links.extend(link_iter);
-        println!("{}:{links:#?}", links.len());
+        println!("Got {} posts so far", links.len());
+        println!("{links:#?}");
     }
+
+    println!("Ended searching with {} posts", links.len());
 
     let mut posts = vec![];
     for i in 0..links.len() {
@@ -173,26 +179,25 @@ async fn get_recent_posts_for_user(
             let post = get_post(c, link).await?;
             posts.push(post);
             continue;
+        } else {
+            bail!("Getting retweets not supported!")
         }
-        todo!()
     }
 
     Ok(posts)
 }
 
-async fn get_post(c: &Client, link: &str) -> Result<Post, fantoccini::error::CmdError> {
+async fn get_post(c: &Client, link: &str) -> Result<Post> {
     let full_link = &format!("https://twitter.com{link}");
-    c.goto(full_link).await?;
-    sleep_secs(3).await;
-    let doc = Html::parse_document(&c.source().await?);
-    let section_selector = &Selector::parse("section").unwrap();
-    println!("{}", doc.select(section_selector).count());
-
-    todo!()
+    //c.goto(full_link).await?;
+    //sleep_secs(3).await;
+    bail!("TODO: Cannot download a post yet");
 }
 
 #[tokio::main]
-async fn main() -> Result<(), fantoccini::error::CmdError> {
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let mut caps = Capabilities::new();
     caps.insert(
         "moz:firefoxOptions".into(),
@@ -211,10 +216,12 @@ async fn main() -> Result<(), fantoccini::error::CmdError> {
 
     set_auth_cookie(&c).await?;
 
-    let posts = get_recent_posts_for_user(&c, "jonhoo").await?;
+    let posts = get_recent_posts_for_user(&c, "jonhoo")
+        .await
+        .wrap_err("Failed getting posts")?;
     for post in posts {
         println!("{post:?}");
     }
 
-    c.close().await
+    c.close().await.map_err(|e| e.into())
 }
