@@ -1,14 +1,42 @@
 use color_eyre::eyre::{bail, eyre, Context, Result};
 use fantoccini::{cookies::Cookie, wd::Capabilities, Client, ClientBuilder, Locator};
+use nix::sys::signal;
+use nix::unistd::Pid;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use scraper::{Html, Selector};
 use serde_json::json;
 use std::env;
+use std::process::Stdio;
+use std::sync::Mutex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::{Child, Command};
 use tokio::time::{sleep, Duration};
 
 const MAX_LINKS_PER_FETCH: usize = 5;
 const AUTH_CACHE_FNAME: &str = "cached_auth";
+
+const DRIVER_COUNT: usize = 5;
+const BASE_PORT: usize = 8444;
+
+static DRIVER_ARRAY: Lazy<Mutex<Vec<(Child, usize, bool)>>> = Lazy::new(|| {
+    let mut v = vec![];
+
+    for n in (0..).take(DRIVER_COUNT) {
+        let port = BASE_PORT + n;
+        println!("Starting driver with port {port}");
+        let driver = Command::new("geckodriver")
+            .arg("-p")
+            .arg(format!("{port}"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        v.push((driver, port, true));
+    }
+
+    Mutex::new(v)
+});
 
 fn sleep_secs(n: usize) -> tokio::time::Sleep {
     sleep(Duration::from_secs(n as u64))
@@ -194,34 +222,90 @@ async fn get_post(c: &Client, link: &str) -> Result<Post> {
     bail!("TODO: Cannot download a post yet");
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    color_eyre::install()?;
+async fn run(c: &Client) -> Result<()> {
+    set_auth_cookie(c).await?;
 
-    let mut caps = Capabilities::new();
-    caps.insert(
-        "moz:firefoxOptions".into(),
-        json!({
-            "prefs": {
-                "javascript.enabled": true
-            },
-        }),
-    );
-
-    let c = ClientBuilder::rustls()
-        .capabilities(caps)
-        .connect("http://localhost:4444")
-        .await
-        .expect("failed to connect to WebDriver");
-
-    set_auth_cookie(&c).await?;
-
-    let posts = get_recent_posts_for_user(&c, "jonhoo")
+    let posts = get_recent_posts_for_user(c, "jonhoo")
         .await
         .wrap_err("Failed getting posts")?;
     for post in posts {
         println!("{post:?}");
     }
 
-    c.close().await.map_err(|e| e.into())
+    Ok(())
+}
+
+struct ClientWithPort {
+    client: Client,
+    port: usize,
+}
+
+impl ClientWithPort {
+    async fn close(self) -> Result<()> {
+        self.client.close().await?;
+        let mut guard = DRIVER_ARRAY.lock().unwrap();
+        let Some(item) = guard.iter_mut().filter(|(_, p, _)| self.port == *p).next() else {
+            bail!("Unable to find driver in array with port {}", self.port);
+        };
+        item.2 = true;
+        drop(guard);
+
+        Ok(())
+    }
+
+    async fn new() -> Result<Option<Self>> {
+        let mut guard = DRIVER_ARRAY.lock().unwrap();
+        let Some(item) = guard.iter_mut().filter(|(_, _, b)| *b).next() else {
+            return Ok(None);
+        };
+        item.2 = false;
+        let port = item.1;
+        drop(guard);
+
+        let mut caps = Capabilities::new();
+        caps.insert(
+            "moz:firefoxOptions".into(),
+            json!({
+                "prefs": {
+                    "javascript.enabled": true
+                },
+            }),
+        );
+
+        let client = ClientBuilder::rustls()
+            .capabilities(caps)
+            .connect(&format!("http://localhost:{port}"))
+            .await
+            .wrap_err("failed to connect to WebDriver")?;
+
+        Ok(Some(ClientWithPort { client, port: 4444 }))
+    }
+}
+
+fn shutdown() -> Result<()> {
+    let mut guard = DRIVER_ARRAY.lock().unwrap();
+    for (child, p, _) in guard.iter_mut() {
+        // TODO: Clean up children
+        let pid = Pid::from_raw(child.id().unwrap() as i32);
+        signal::kill(pid, signal::SIGTERM)
+            .wrap_err(format!("Failed running kill on process with port {p}"))?;
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+
+    let c = ClientWithPort::new()
+        .await
+        .wrap_err("Failed getting a client")?
+        .ok_or(eyre!("No clients available"))?;
+
+    if let Err(e) = run(&c.client).await {
+        shutdown().wrap_err("Failed shutting down")?;
+        return Err(e);
+    } else {
+        shutdown()
+    }
 }
