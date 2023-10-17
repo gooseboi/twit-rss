@@ -1,15 +1,12 @@
 use color_eyre::eyre::{bail, eyre, Result};
 use fantoccini::{cookies::Cookie, Client, Locator};
-use std::env;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::utils::sleep_secs;
+use crate::{config::TwitterConfig, utils::sleep_secs};
 
-async fn auth(c: &Client) -> Result<Cookie<'static>> {
-    let username = env::var("TWITTER_USERNAME")
-        .map_err(|_| eyre!("Could not load twitter username from environment!"))?;
-    let password = env::var("TWITTER_PASSWORD")
-        .map_err(|_| eyre!("Could not load twitter password from environment!"))?;
+async fn auth(c: &Client, config: &TwitterConfig) -> Result<Cookie<'static>> {
+    let username = config.username();
+    let password = config.password();
 
     c.goto("https://twitter.com/").await?;
     sleep_secs(5).await;
@@ -28,7 +25,7 @@ async fn auth(c: &Client) -> Result<Cookie<'static>> {
     c.find(Locator::XPath("/html/body/div[1]/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[5]/label/div/div[2]/div/input")).await?.click().await?;
     println!("Clicked on the username box");
     sleep_secs(3).await;
-    c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[5]/label/div/div[2]/div/input")).await?.send_keys(username.as_str()).await?;
+    c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[5]/label/div/div[2]/div/input")).await?.send_keys(username).await?;
     println!("Typed in the username box");
     sleep_secs(1).await;
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[6]")).await?.click().await?;
@@ -41,7 +38,7 @@ async fn auth(c: &Client) -> Result<Cookie<'static>> {
         .contains("Enter your phone number")
     {
         println!("Got the confirmation dialog");
-        c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div[2]/label/div/div[2]/div/input")).await?.send_keys(username.as_str()).await?;
+        c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div[2]/label/div/div[2]/div/input")).await?.send_keys(username).await?;
         println!("  Inputted the username");
         sleep_secs(2).await;
         c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div/div/div/div")).await?.click().await?;
@@ -49,7 +46,7 @@ async fn auth(c: &Client) -> Result<Cookie<'static>> {
         sleep_secs(3).await;
     }
 
-    c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div/div[3]/div/label/div/div[2]/div[1]/input")).await?.send_keys(password.as_str()).await?;
+    c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div/div[3]/div/label/div/div[2]/div[1]/input")).await?.send_keys(password).await?;
     println!("Typed in the pasword");
     sleep_secs(3).await;
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div[1]/div/div/div/div")).await?.click().await?;
@@ -65,9 +62,9 @@ async fn auth(c: &Client) -> Result<Cookie<'static>> {
         .clone())
 }
 
-pub async fn set_auth_cookie(c: &Client, auth_fname: &str) -> Result<()> {
+pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
     println!("Loading auth");
-    let cached = tokio::fs::File::open(auth_fname).await;
+    let cached = tokio::fs::File::open(&config.auth_cache_fname).await;
     if let Ok(mut f) = cached {
         println!("Found cached auth!");
         let mut contents = vec![];
@@ -89,11 +86,11 @@ pub async fn set_auth_cookie(c: &Client, auth_fname: &str) -> Result<()> {
         unsafe { drop(Box::from_raw(s_ptr)) };
     } else {
         println!("Reloading auth from site");
-        let cookie = auth(c).await?;
+        let cookie = auth(c, config).await?;
         let mut f = tokio::fs::OpenOptions::new()
             .write(true)
             .create(true)
-            .open(auth_fname)
+            .open(&config.auth_cache_fname)
             .await
             .unwrap();
         f.write_all(cookie.to_string().as_str().as_bytes())

@@ -6,9 +6,13 @@ use std::{
     ops::Deref,
     process::{Child, Command, Stdio},
     sync::Mutex,
+    time::Duration,
 };
 
-use crate::{client::set_auth_cookie, config::{DriverConfig, TwitterConfig}};
+use crate::{
+    client::set_auth_cookie,
+    config::{DriverConfig, TwitterConfig},
+};
 
 struct PoolValue {
     driver: Child,
@@ -61,7 +65,7 @@ impl DriverPool {
                     .connect(&format!("http://localhost:{port}"))
                     .await
                     .wrap_err("failed to connect to WebDriver")?;
-                if let Err(e) = set_auth_cookie(&client, &config.auth_cache_fname).await {
+                if let Err(e) = set_auth_cookie(&client, config).await {
                     client.close().await?;
                     let mut lock = self.pool.lock().unwrap();
                     lock.push(val);
