@@ -76,9 +76,10 @@ pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
         // SAFETY: Since we already own this pointer, doubly referencing it so that Cookie::parse
         // can use it. Moreover, having double references doesn't matter, as we do not care about
         // the value and Cookie::parse also does not modify it.
-        let s = unsafe { Box::from_raw(s_ptr.clone()) };
+        let s = unsafe { Box::from_raw(s_ptr) };
         let cookie = Cookie::parse(&*Box::leak(s)).unwrap();
         c.goto("https://twitter.com").await?;
+        c.delete_all_cookies().await?;
         c.add_cookie(cookie).await?;
         c.refresh().await?;
         // SAFETY: We know that this pointer is valid, and moreover that we own

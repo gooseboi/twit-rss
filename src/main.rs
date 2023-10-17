@@ -129,9 +129,18 @@ async fn run(pool: &DriverPool, config: &Config) -> Result<()> {
         .wrap_err("Could not get client")?
         .ok_or(eyre!("No clients available!"))?;
 
-    let users = get_users_from_following(&client, "<username>")
+    let users = match get_users_from_following(&client, "<username>")
         .await
-        .wrap_err("Failed getting users")?;
+        .wrap_err("Failed getting users")
+    {
+        Ok(users) => users,
+        Err(e) => {
+            client.close().await?;
+            return Err(e);
+        }
+    };
+
+    client.close().await?;
 
     for user in users {
         println!("{user}");

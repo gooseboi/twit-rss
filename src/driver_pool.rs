@@ -38,6 +38,8 @@ impl DriverPool {
             pool.push(PoolValue { driver, port });
         }
         let pool = Mutex::new(pool);
+        // Give it some time to warm up
+        std::thread::sleep(Duration::from_secs(1));
         Ok(DriverPool { pool })
     }
 
