@@ -4,19 +4,13 @@ use regex::Regex;
 use scraper::{Html, Selector};
 
 mod client;
+mod config;
 mod driver_pool;
 mod utils;
 
+use config::Config;
 use driver_pool::DriverPool;
 use utils::sleep_secs;
-
-const MAX_LINKS_PER_FETCH: usize = 5;
-const AUTH_CACHE_FNAME: &str = "cached_auth";
-
-const MAX_CONCURRENT_USERS: usize = 3;
-const MAX_SESSIONS_PER_USER: usize = 3;
-const DRIVER_COUNT: usize = MAX_CONCURRENT_USERS * MAX_SESSIONS_PER_USER;
-const BASE_PORT: usize = 8444;
 
 #[derive(Debug)]
 struct Post {
@@ -27,7 +21,11 @@ struct Post {
     repost_date: u64,
 }
 
-async fn get_recent_posts_for_user(c: &Client, user_id: &str) -> Result<Vec<Post>> {
+async fn get_recent_posts_for_user(
+    c: &Client,
+    user_id: &str,
+    config: &Config,
+) -> Result<Vec<Post>> {
     c.goto(&format!("https://twitter.com/{user_id}")).await?;
     sleep_secs(4).await;
     let username = {
@@ -60,7 +58,7 @@ async fn get_recent_posts_for_user(c: &Client, user_id: &str) -> Result<Vec<Post
     let user_status_format = &format!("/{user_id}");
     let mut links = indexmap::IndexSet::new();
 
-    while links.len() < MAX_LINKS_PER_FETCH
+    while links.len() < config.fetch_config.max_links_per_fetch
         || !links
             .last()
             .map(|l: &String| l.starts_with(user_status_format))
@@ -124,9 +122,9 @@ async fn get_users_from_following(c: &Client, user: &str) -> Result<Vec<String>>
     bail!("TODO: Cannot get users from a subscription yet");
 }
 
-async fn run(pool: &DriverPool) -> Result<()> {
+async fn run(pool: &DriverPool, config: &Config) -> Result<()> {
     let client = pool
-        .get_client(AUTH_CACHE_FNAME)
+        .get_client(&config.twitter_config)
         .await
         .wrap_err("Could not get client")?
         .ok_or(eyre!("No clients available!"))?;
@@ -146,9 +144,11 @@ async fn run(pool: &DriverPool) -> Result<()> {
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let pool = DriverPool::new(BASE_PORT, DRIVER_COUNT).wrap_err("Failed creating pool")?;
+    let config = Config::get().wrap_err("Failed getting config")?;
 
-    if let e @ Err(_) = run(&pool).await {
+    let pool = DriverPool::new(&config.driver_config).wrap_err("Failed creating pool")?;
+
+    if let e @ Err(_) = run(&pool, &config).await {
         pool.close().wrap_err("Failed closing drivers")?;
         return e;
     } else {

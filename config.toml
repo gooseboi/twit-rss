@@ -1,0 +1,31 @@
+# WebDriver configuration
+[drivers]
+# How many drivers are available at a time. If none are available when a fetch
+# is tried, the thread will simply spin.
+driver_count = 9
+
+# The program allocates ports linearly. This is the base port for the
+# allocation. i.e the first port will be `base_port`, then the second will be
+# `base_port + 1`
+base_port = 8444
+
+# Configuring how post fetches should be performed
+[fetch]
+# When fetching a user's timeline (when updating it), how many links to collect
+# This is a minimum, as fetching doesn't stop until the last tweet fetched is
+# not a retweet.
+max_links_per_fetch = 5
+
+# When fetching multiple users' timelines concurrently, how many active user
+# fetches should be active at a time
+max_concurrent_users = 3
+
+# When fetching a user's timeline, how many posts to fetch concurrently
+max_sessions_per_user = 3
+
+# Get all "following" from this user, and fetch the data from every user
+fetch_username = "gooseiman"
+
+# Twitter conf
+[twitter]
+auth_cache_fname = "cached_auth"

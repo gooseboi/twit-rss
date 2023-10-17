@@ -8,7 +8,7 @@ use std::{
     sync::Mutex,
 };
 
-use crate::client::set_auth_cookie;
+use crate::{client::set_auth_cookie, config::{DriverConfig, TwitterConfig}};
 
 struct PoolValue {
     driver: Child,
@@ -20,10 +20,10 @@ pub struct DriverPool {
 }
 
 impl DriverPool {
-    pub fn new(base_port: usize, count: usize) -> Result<Self> {
+    pub fn new(config: &DriverConfig) -> Result<Self> {
         let mut pool = vec![];
-        for n in 0..count {
-            let port = base_port + n;
+        for n in 0..config.driver_count {
+            let port = config.base_port + n;
             let driver = Command::new("geckodriver")
                 .arg("-p")
                 .arg(format!("{port}"))
@@ -37,7 +37,7 @@ impl DriverPool {
         Ok(DriverPool { pool })
     }
 
-    pub async fn get_client(&self, auth_fname: &str) -> Result<Option<WrappedClient>> {
+    pub async fn get_client(&self, config: &TwitterConfig) -> Result<Option<WrappedClient>> {
         let mut caps = Capabilities::new();
         caps.insert(
             "moz:firefoxOptions".into(),
@@ -61,7 +61,7 @@ impl DriverPool {
                     .connect(&format!("http://localhost:{port}"))
                     .await
                     .wrap_err("failed to connect to WebDriver")?;
-                if let Err(e) = set_auth_cookie(&client, auth_fname).await {
+                if let Err(e) = set_auth_cookie(&client, &config.auth_cache_fname).await {
                     client.close().await?;
                     let mut lock = self.pool.lock().unwrap();
                     lock.push(val);
