@@ -1,11 +1,11 @@
 use color_eyre::eyre::{Context, Result};
 use fantoccini::{wd::Capabilities, Client, ClientBuilder};
 use serde_json::json;
+use tokio::sync::Mutex;
 use std::{
     mem::ManuallyDrop,
     ops::Deref,
     process::{Child, Command, Stdio},
-    sync::Mutex,
     time::Duration,
 };
 
@@ -54,7 +54,7 @@ impl DriverPool {
             }),
         );
 
-        let mut lock = self.pool.lock().unwrap();
+        let mut lock = self.pool.lock().await;
         let val = lock.pop();
         drop(lock);
 
@@ -69,7 +69,7 @@ impl DriverPool {
                     .wrap_err("failed to connect to WebDriver")?;
                 if let Err(e) = set_auth_cookie(&client, config).await {
                     client.close().await?;
-                    let mut lock = self.pool.lock().unwrap();
+                    let mut lock = self.pool.lock().await;
                     lock.push(val);
                     drop(lock);
                     return Err(e);
@@ -84,8 +84,8 @@ impl DriverPool {
         }
     }
 
-    pub fn close(&self) -> Result<()> {
-        let mut v = self.pool.lock().unwrap();
+    pub async fn close(&self) -> Result<()> {
+        let mut v = self.pool.lock().await;
         for PoolValue { port: _, driver } in v.iter_mut() {
             driver.kill()?;
             driver.wait()?;
@@ -103,7 +103,7 @@ pub struct WrappedClient<'a> {
 impl<'a> WrappedClient<'a> {
     pub async fn close(mut self) -> Result<()> {
         let res = self.client.close().await.map_err(|e| e.into());
-        let mut lock = self.pool.lock().unwrap();
+        let mut lock = self.pool.lock().await;
         let val = unsafe { ManuallyDrop::take(&mut self.val) };
         lock.push(val);
         res

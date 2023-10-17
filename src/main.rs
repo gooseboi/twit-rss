@@ -158,9 +158,9 @@ async fn main() -> Result<()> {
     let pool = DriverPool::new(&config.driver_config).wrap_err("Failed creating pool")?;
 
     if let e @ Err(_) = run(&pool, &config).await {
-        pool.close().wrap_err("Failed closing drivers")?;
+        pool.close().await.wrap_err("Failed closing drivers")?;
         return e;
     } else {
-        pool.close().wrap_err("Failed closing drivers")
+        pool.close().await.wrap_err("Failed closing drivers")
     }
 }
