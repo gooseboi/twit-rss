@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex;
+use tracing::debug;
 
 use crate::client::set_auth_cookie;
 use crate::config::{DriverConfig, TwitterConfig};
@@ -59,7 +60,7 @@ impl DriverPool {
         match val {
             Some(val) => {
                 let port = val.port;
-                println!("Executing using port {port}");
+                debug!("Returning client using port {port}");
                 let client = ClientBuilder::rustls()
                     .capabilities(caps)
                     .connect(&format!("http://localhost:{port}"))

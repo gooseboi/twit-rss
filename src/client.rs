@@ -1,6 +1,7 @@
 use color_eyre::eyre::{bail, eyre, Result};
 use fantoccini::{cookies::Cookie, Client, Locator};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tracing::{debug, info};
 
 use crate::{config::TwitterConfig, utils::sleep_secs};
 
@@ -20,16 +21,16 @@ async fn auth(c: &Client, config: &TwitterConfig) -> Result<Cookie<'static>> {
     .await?
     .click()
     .await?;
-    println!("Opened the sign in box");
+    debug!("Opened the sign in box");
     sleep_secs(3).await;
     c.find(Locator::XPath("/html/body/div[1]/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[5]/label/div/div[2]/div/input")).await?.click().await?;
-    println!("Clicked on the username box");
+    debug!("Clicked on the username box");
     sleep_secs(3).await;
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[5]/label/div/div[2]/div/input")).await?.send_keys(username).await?;
-    println!("Typed in the username box");
+    debug!("Typed in the username box");
     sleep_secs(1).await;
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[6]")).await?.click().await?;
-    println!("Clicked on the next button");
+    debug!("Clicked on the next button");
     sleep_secs(5).await;
 
     if c.source()
@@ -37,20 +38,20 @@ async fn auth(c: &Client, config: &TwitterConfig) -> Result<Cookie<'static>> {
         .as_str()
         .contains("Enter your phone number")
     {
-        println!("Got the confirmation dialog");
+        debug!("Got the phone confirmation dialog");
         c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div[2]/label/div/div[2]/div/input")).await?.send_keys(username).await?;
-        println!("  Inputted the username");
+        debug!("Inputted the username");
         sleep_secs(2).await;
         c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div/div/div/div")).await?.click().await?;
-        println!("  Clicked on the button");
+        debug!("Clicked on the button");
         sleep_secs(3).await;
     }
 
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div/div[3]/div/label/div/div[2]/div[1]/input")).await?.send_keys(password).await?;
-    println!("Typed in the password");
+    debug!("Typed in the password");
     sleep_secs(3).await;
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div[1]/div/div/div/div")).await?.click().await?;
-    println!("Clicked on the log in button");
+    debug!("Clicked on the log in button");
     sleep_secs(7).await;
 
     Ok(c.get_all_cookies()
@@ -63,10 +64,10 @@ async fn auth(c: &Client, config: &TwitterConfig) -> Result<Cookie<'static>> {
 }
 
 pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
-    println!("Loading auth");
+    info!("Loading auth token");
     let cached = tokio::fs::File::open(&config.auth_cache_fname).await;
     if let Ok(mut f) = cached {
-        println!("Found cached auth!");
+        info!("Found cached auth");
         let mut contents = vec![];
         f.read_to_end(&mut contents).await.unwrap();
         // For some reason, Clients can only add cookies with 'static, so
@@ -78,7 +79,7 @@ pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
         c.add_cookie(cookie).await?;
         c.refresh().await?;
     } else {
-        println!("Reloading auth from site");
+        info!("Reloading auth from site");
         let cookie = auth(c, config).await?;
         let mut f = tokio::fs::OpenOptions::new()
             .write(true)
@@ -89,7 +90,7 @@ pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
         f.write_all(cookie.to_string().as_str().as_bytes())
             .await
             .unwrap();
-        println!("Cached auth from site");
+        info!("Successfully fetched and cached auth from site");
     }
     Ok(())
 }

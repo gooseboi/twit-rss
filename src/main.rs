@@ -7,6 +7,9 @@ use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::sync::Arc;
+use tracing::{debug, error, info};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
 
 mod client;
 mod config;
@@ -31,12 +34,13 @@ struct FetchedUser {
     _banner_url: String,
 }
 
-async fn get_user_info(_c: &Client, _user_id: &str, _config: &Config) -> Result<FetchedUser> {
-    bail!("User info not implemented yet");
+async fn get_user_info(c: &Client, user_link: &str, _config: &Config) -> Result<FetchedUser> {
+    c.goto(user_link).await?;
+
 }
 
-async fn get_user_link(username: &str) -> String {
-
+fn get_user_link(username: &str) -> String {
+    format!("https://twitter.com/{username}")
 }
 
 async fn get_recent_posts_from_user(c: &Client, user_id: &str, config: &Config) -> Result<Vec<()>> {
@@ -64,7 +68,7 @@ async fn get_recent_posts_from_user(c: &Client, user_id: &str, config: &Config) 
             .trim()
             .to_owned()
     };
-    println!("Downloading data for {username}");
+    debug!("Downloading data for {username}");
 
     let re = Regex::new(&format!("^/\\w+/status/\\d+$")).unwrap();
     let anchor_selector = &Selector::parse("a").unwrap();
@@ -91,11 +95,10 @@ async fn get_recent_posts_from_user(c: &Client, user_id: &str, config: &Config) 
             .map(|l| l.to_owned());
 
         links.extend(link_iter);
-        println!("Got {} posts so far", links.len());
-        println!("{links:#?}");
+        debug!("Got {} posts so far", links.len());
     }
 
-    println!("Ended searching with {} posts", links.len());
+    info!("Ended searching with {} posts", links.len());
 
     let mut posts = vec![];
     for i in 0..links.len() {
@@ -135,6 +138,9 @@ async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<Str
     while retries < max_retries {
         c.execute("window.scrollBy(0,100);", vec![]).await?;
         sleep_secs(1 * (retries + 1)).await;
+        if retries != 0 {
+            info!("{retries}/{max_retries} retries at fetching users from following");
+        }
 
         let s = c.source().await?;
         let doc = Html::parse_document(&s);
@@ -155,12 +161,10 @@ async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<Str
         } else {
             retries = 0;
         }
-        println!("{retries}/{max_retries} retries");
-        println!("Got {} users so far", users.len());
-        println!("{users:#?}");
+        debug!("Got {} users so far", users.len());
     }
 
-    println!("Ended searching with {} users", users.len());
+    info!("Ended searching with {} users", users.len());
 
     Ok(users.into_iter().collect())
 }
@@ -192,41 +196,38 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
         rxs.push(user_rx.clone());
     }
 
-    //let (post_tx, post_rx) = broadcast::channel(config.driver_config.driver_count*2);
     let config = Arc::new(config);
     for user in users {
         user_tx.send(user).await?;
     }
-    println!("Sent all users through channel");
 
     let mut tasks = vec![];
     for i in 0..config.fetch_config.max_concurrent_users {
         let user_rx = rxs.pop().unwrap();
         let pool = Arc::clone(&pool);
         let config = Arc::clone(&config);
-        println!("Starting user fetch task {i}");
         let handle = tokio::spawn(async move {
-            println!("Started user fetch task {i}");
+            let id = i;
+            debug!("Started user fetch task {id}");
             let c = pool
                 .get_client(&config.twitter_config)
                 .await
                 .wrap_err("Failed getting a client to download users")?;
             let c = c.ok_or(eyre!("Failed getting a client to download users, even thought there should be some available"))?;
-            println!("Successfully got client");
+            debug!("Successfully got client in task {id}");
             loop {
-                println!("Starting user loop");
                 let user = match user_rx.try_recv() {
                     Ok(u) => u,
                     Err(e) => match e {
                         async_channel::TryRecvError::Closed => bail!("Channel closed unexpectedly"),
                         async_channel::TryRecvError::Empty => {
-                            println!("Finished processing messages");
+                            info!("Finished processing users");
                             break;
                         }
                     },
                 };
-                println!("Received user {user} in queue");
-                let user_link = get_user_link(user);
+                debug!("Received user {user} in task {id}");
+                let user_link = get_user_link(&user);
                 let _user_info = get_user_info(&c, &user_link, &config).await?;
                 let _posts = get_recent_posts_from_user(&c, &user_link, &config).await?;
             }
@@ -238,7 +239,7 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
     for task in tasks {
         let task = task.await?;
         if let Err(e) = task {
-            println!("Task encountered an error: {e}",);
+            error!("Task encountered an error: {e}",);
         }
     }
 
@@ -248,6 +249,11 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
 
     let config = Config::get().wrap_err("Failed getting config")?;
 
