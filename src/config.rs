@@ -1,13 +1,15 @@
 use clap::Parser;
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{bail, eyre, Context, Result};
 use serde::Deserialize;
-use std::{env, io::Read};
+use std::{collections::HashMap, env, io::Read};
 
 #[derive(Deserialize, Debug)]
 pub struct FetchConfig {
     pub max_links_per_fetch: usize,
     pub max_concurrent_users: usize,
     pub max_sessions_per_user: usize,
+    pub fetch_username: String,
+    pub max_retries: usize,
 }
 
 #[derive(Deserialize, Debug)]
@@ -21,8 +23,9 @@ pub struct TwitterConfig {
     pub auth_cache_fname: String,
     // This need to be there, to allow for auth, but they are options as a hack for toml to not
     // error out, and to not have two config structs.
-    pub username: Option<String>,
-    pub password: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    css_classes: HashMap<String, Vec<String>>,
 }
 
 impl TwitterConfig {
@@ -32,6 +35,16 @@ impl TwitterConfig {
 
     pub fn password(&self) -> &str {
         self.password.as_ref().unwrap()
+    }
+
+    pub fn css_class(&self, name: &str) -> Result<Vec<&str>> {
+        Ok(self
+            .css_classes
+            .get(name)
+            .ok_or(eyre!("CSS class not in config"))?
+            .iter()
+            .map(|s| s.as_str())
+            .collect())
     }
 }
 

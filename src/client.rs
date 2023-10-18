@@ -47,7 +47,7 @@ async fn auth(c: &Client, config: &TwitterConfig) -> Result<Cookie<'static>> {
     }
 
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[1]/div/div/div[3]/div/label/div/div[2]/div[1]/input")).await?.send_keys(password).await?;
-    println!("Typed in the pasword");
+    println!("Typed in the password");
     sleep_secs(3).await;
     c.find(Locator::XPath("/html/body/div/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div[1]/div/div/div/div")).await?.click().await?;
     println!("Clicked on the log in button");
@@ -97,6 +97,7 @@ pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
         f.write_all(cookie.to_string().as_str().as_bytes())
             .await
             .unwrap();
+        println!("Cached auth from site");
     }
     Ok(())
 }

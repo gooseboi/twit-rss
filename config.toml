@@ -26,6 +26,15 @@ max_sessions_per_user = 3
 # Get all "following" from this user, and fetch the data from every user
 fetch_username = "gooseiman"
 
+# When fetching data by scrolling, max times that the operation should be
+# retried when there is no change
+max_retries = 5
+
 # Twitter conf
 [twitter]
+# Filename for caching the auth cookie for twitter
 auth_cache_fname = "cached_auth"
+
+# The classes needed to identify an element
+[twitter.css_classes]
+following_users = ["css-4rbku5", "css-18t94o4", "r-1loqt21", "r-1wbh5a2"]

@@ -1,18 +1,16 @@
 use color_eyre::eyre::{Context, Result};
 use fantoccini::{wd::Capabilities, Client, ClientBuilder};
 use serde_json::json;
-use tokio::sync::Mutex;
 use std::{
     mem::ManuallyDrop,
     ops::Deref,
     process::{Child, Command, Stdio},
     time::Duration,
 };
+use tokio::sync::Mutex;
 
-use crate::{
-    client::set_auth_cookie,
-    config::{DriverConfig, TwitterConfig},
-};
+use crate::client::set_auth_cookie;
+use crate::config::{DriverConfig, TwitterConfig};
 
 struct PoolValue {
     driver: Child,

@@ -1,5 +1,6 @@
 use color_eyre::eyre::{bail, eyre, Context, Result};
 use fantoccini::Client;
+use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
 
@@ -10,7 +11,15 @@ mod utils;
 
 use config::Config;
 use driver_pool::DriverPool;
-use utils::sleep_secs;
+use tokio::sync::broadcast;
+use utils::{get_post_full_link, sleep_secs};
+
+fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
+    classes.iter().all(|class| {
+        e.value()
+            .has_class(class, scraper::CaseSensitivity::AsciiCaseInsensitive)
+    })
+}
 
 #[derive(Debug)]
 struct Post {
@@ -98,28 +107,52 @@ async fn get_recent_posts_for_user(
     Ok(posts)
 }
 
-fn get_full_link(link: &str) -> String {
-    if link.starts_with("https://twitter.com") {
-        // "https://twitter.com/..."
-        link.to_owned()
-    } else if link.starts_with("twitter.com") {
-        // "twitter.com/..."
-        format!("https://{link}")
-    } else {
-        // "/..."
-        format!("https://twitter.com{link}")
-    }
-}
-
 async fn get_post(c: &Client, link: &str) -> Result<Post> {
-    let full_link = get_full_link(link);
+    let full_link = get_post_full_link(link);
     //c.goto(full_link).await?;
     //sleep_secs(3).await;
     bail!("TODO: Cannot download a post yet");
 }
 
-async fn get_users_from_following(c: &Client, user: &str) -> Result<Vec<String>> {
-    bail!("TODO: Cannot get users from a subscription yet");
+async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<String>> {
+    c.goto(&format!(
+        "https://twitter.com/{user}/following",
+        user = config.fetch_config.fetch_username
+    ))
+    .await?;
+    sleep_secs(6).await;
+    let anchor_selector = &Selector::parse("a").unwrap();
+    let following_users_classes = config.twitter_config.css_class("following_users")?;
+    let mut users = IndexSet::new();
+
+    let mut retries = 0;
+    while retries < config.fetch_config.max_retries {
+        c.execute("window.scrollBy(0,100);", vec![]).await?;
+        sleep_secs(1 * (retries + 1)).await;
+
+        let s = c.source().await?;
+        let doc = Html::parse_document(&s);
+        let users_iter = doc
+            .select(anchor_selector)
+            .filter(|a| has_classes(*a, &following_users_classes))
+            .filter_map(|a| a.value().attr("href").map(|s| s.get(1..).unwrap().to_owned()));
+
+        let old_len = users.len();
+        users.extend(users_iter);
+        let diff = users.len() - old_len;
+        if diff == 0 {
+            retries += 1;
+        } else {
+            retries = 0;
+        }
+        println!("{retries} retries");
+        println!("Got {} users so far", users.len());
+        println!("{users:#?}");
+    }
+
+    println!("Ended searching with {} users", users.len());
+
+    Ok(users.into_iter().collect())
 }
 
 async fn run(pool: &DriverPool, config: &Config) -> Result<()> {
@@ -129,7 +162,7 @@ async fn run(pool: &DriverPool, config: &Config) -> Result<()> {
         .wrap_err("Could not get client")?
         .ok_or(eyre!("No clients available!"))?;
 
-    let users = match get_users_from_following(&client, "<username>")
+    let users = match get_users_from_following(&client, &config)
         .await
         .wrap_err("Failed getting users")
     {
