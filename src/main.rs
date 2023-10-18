@@ -2,7 +2,7 @@ use color_eyre::{
     eyre::{bail, eyre, Context, Result},
     Report,
 };
-use fantoccini::Client;
+use fantoccini::{Client, Locator, error::CmdError};
 use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
@@ -29,14 +29,48 @@ fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
 
 struct FetchedUser {
     _name: String,
+    _user_id: String,
     _description: String,
     _pfp_url: String,
     _banner_url: String,
 }
 
-async fn get_user_info(c: &Client, user_link: &str, _config: &Config) -> Result<FetchedUser> {
+async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
     c.goto(user_link).await?;
+    sleep_secs(4).await;
+    // Find "Yes, view profile" button for NSFW profiles
+    match c.find(Locator::XPath("/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div[3]/div/div/div[2]/div/div[3]/div")).await {
+        Ok(e) => e.click().await?,
+        Err(CmdError::NoSuchElement(_)) => {}
+        Err(e) => return Err(e.into()),
+    };
 
+    Ok(())
+}
+
+async fn get_user_info(c: &Client, user_link: &str, config: &Config) -> Result<FetchedUser> {
+    goto_user_profile(c, user_link).await?;
+    let doc = Html::parse_document(&c.source().await?);
+    let span_selector = &Selector::parse("span").unwrap();
+    let div_selector = &Selector::parse("div").unwrap();
+    let userinfo_classes = config.twitter_config.css_class("user_info")?;
+    let username_classes = config.twitter_config.css_class("user_name")?;
+    let username_div = doc
+        .select(div_selector)
+        .filter(|d| has_classes(*d, &userinfo_classes))
+        .filter(|d| {
+            debug!("Found a div with userinfo class");
+            d.value()
+                .attr("data-testid")
+                .map(|s| s == "UserName")
+                .unwrap_or(false)
+        });
+
+    for div in username_div {
+        println!("{}", div.text().collect::<String>());
+    }
+
+    bail!("TODO: Getting user info not implemented yet")
 }
 
 fn get_user_link(username: &str) -> String {
@@ -187,6 +221,8 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
         }
     };
 
+    // TODO: Maybe do the user list fetch at the same time as the users
+    // list is starting to be fetched
     client.close().await?;
 
     let max_concurrent_users = config.fetch_config.max_concurrent_users;
@@ -202,6 +238,7 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
     }
 
     let mut tasks = vec![];
+    info!("Starting {} tasks to fetch users", config.fetch_config.max_concurrent_users);
     for i in 0..config.fetch_config.max_concurrent_users {
         let user_rx = rxs.pop().unwrap();
         let pool = Arc::clone(&pool);

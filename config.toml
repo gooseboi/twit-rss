@@ -38,3 +38,6 @@ auth_cache_fname = "cached_auth"
 # The classes needed to identify an element
 [twitter.css_classes]
 following_users = ["css-4rbku5", "css-18t94o4", "r-1loqt21", "r-1wbh5a2"]
+user_info = ["css-1dbjc4n", "r-1ifxtd0", "r-ymttw5", "r-ttdzmv"]
+user_description = ["css-1dbjc4n", "r-1adg3ll", "r-6gpygo"]
+user_name = ["css-1dbjc4n", "r-6gpygo", "r-14gqq1x"]
