@@ -72,19 +72,11 @@ pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
         // For some reason, Clients can only add cookies with 'static, so
         // this must be leaked
         let s = String::from_utf8(contents).unwrap().into_boxed_str();
-        let s_ptr = Box::into_raw(s);
-        // SAFETY: Since we already own this pointer, doubly referencing it so that Cookie::parse
-        // can use it. Moreover, having double references doesn't matter, as we do not care about
-        // the value and Cookie::parse also does not modify it.
-        let s = unsafe { Box::from_raw(s_ptr) };
         let cookie = Cookie::parse(&*Box::leak(s)).unwrap();
         c.goto("https://twitter.com").await?;
         c.delete_all_cookies().await?;
         c.add_cookie(cookie).await?;
         c.refresh().await?;
-        // SAFETY: We know that this pointer is valid, and moreover that we own
-        // it, and therefore can drop it
-        unsafe { drop(Box::from_raw(s_ptr)) };
     } else {
         println!("Reloading auth from site");
         let cookie = auth(c, config).await?;

@@ -1,8 +1,12 @@
-use color_eyre::eyre::{bail, eyre, Context, Result};
+use color_eyre::{
+    eyre::{bail, eyre, Context, Result},
+    Report,
+};
 use fantoccini::Client;
 use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
+use std::sync::Arc;
 
 mod client;
 mod config;
@@ -11,7 +15,6 @@ mod utils;
 
 use config::Config;
 use driver_pool::DriverPool;
-use tokio::sync::broadcast;
 use utils::{get_post_full_link, sleep_secs};
 
 fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
@@ -21,20 +24,22 @@ fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
     })
 }
 
-#[derive(Debug)]
-struct Post {
-    link: String,
-    date: u64,
-    text: String,
-    repost_link: Option<String>,
-    repost_date: u64,
+struct FetchedUser {
+    _name: String,
+    _description: String,
+    _pfp_url: String,
+    _banner_url: String,
 }
 
-async fn get_recent_posts_for_user(
-    c: &Client,
-    user_id: &str,
-    config: &Config,
-) -> Result<Vec<Post>> {
+async fn get_user_info(_c: &Client, _user_id: &str, _config: &Config) -> Result<FetchedUser> {
+    bail!("User info not implemented yet");
+}
+
+async fn get_user_link(username: &str) -> String {
+
+}
+
+async fn get_recent_posts_from_user(c: &Client, user_id: &str, config: &Config) -> Result<Vec<()>> {
     c.goto(&format!("https://twitter.com/{user_id}")).await?;
     sleep_secs(4).await;
     let username = {
@@ -107,8 +112,8 @@ async fn get_recent_posts_for_user(
     Ok(posts)
 }
 
-async fn get_post(c: &Client, link: &str) -> Result<Post> {
-    let full_link = get_post_full_link(link);
+async fn get_post(_c: &Client, link: &str) -> Result<()> {
+    let _full_link = get_post_full_link(link);
     //c.goto(full_link).await?;
     //sleep_secs(3).await;
     bail!("TODO: Cannot download a post yet");
@@ -126,7 +131,8 @@ async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<Str
     let mut users = IndexSet::new();
 
     let mut retries = 0;
-    while retries < config.fetch_config.max_retries {
+    let max_retries = config.fetch_config.max_retries;
+    while retries < max_retries {
         c.execute("window.scrollBy(0,100);", vec![]).await?;
         sleep_secs(1 * (retries + 1)).await;
 
@@ -135,7 +141,11 @@ async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<Str
         let users_iter = doc
             .select(anchor_selector)
             .filter(|a| has_classes(*a, &following_users_classes))
-            .filter_map(|a| a.value().attr("href").map(|s| s.get(1..).unwrap().to_owned()));
+            .filter_map(|a| {
+                a.value()
+                    .attr("href")
+                    .map(|s| s.get(1..).unwrap().to_owned())
+            });
 
         let old_len = users.len();
         users.extend(users_iter);
@@ -145,7 +155,7 @@ async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<Str
         } else {
             retries = 0;
         }
-        println!("{retries} retries");
+        println!("{retries}/{max_retries} retries");
         println!("Got {} users so far", users.len());
         println!("{users:#?}");
     }
@@ -155,7 +165,7 @@ async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec<Str
     Ok(users.into_iter().collect())
 }
 
-async fn run(pool: &DriverPool, config: &Config) -> Result<()> {
+async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
     let client = pool
         .get_client(&config.twitter_config)
         .await
@@ -175,8 +185,61 @@ async fn run(pool: &DriverPool, config: &Config) -> Result<()> {
 
     client.close().await?;
 
+    let max_concurrent_users = config.fetch_config.max_concurrent_users;
+    let (user_tx, user_rx) = async_channel::unbounded();
+    let mut rxs = vec![];
+    for _ in 0..max_concurrent_users {
+        rxs.push(user_rx.clone());
+    }
+
+    //let (post_tx, post_rx) = broadcast::channel(config.driver_config.driver_count*2);
+    let config = Arc::new(config);
     for user in users {
-        println!("{user}");
+        user_tx.send(user).await?;
+    }
+    println!("Sent all users through channel");
+
+    let mut tasks = vec![];
+    for i in 0..config.fetch_config.max_concurrent_users {
+        let user_rx = rxs.pop().unwrap();
+        let pool = Arc::clone(&pool);
+        let config = Arc::clone(&config);
+        println!("Starting user fetch task {i}");
+        let handle = tokio::spawn(async move {
+            println!("Started user fetch task {i}");
+            let c = pool
+                .get_client(&config.twitter_config)
+                .await
+                .wrap_err("Failed getting a client to download users")?;
+            let c = c.ok_or(eyre!("Failed getting a client to download users, even thought there should be some available"))?;
+            println!("Successfully got client");
+            loop {
+                println!("Starting user loop");
+                let user = match user_rx.try_recv() {
+                    Ok(u) => u,
+                    Err(e) => match e {
+                        async_channel::TryRecvError::Closed => bail!("Channel closed unexpectedly"),
+                        async_channel::TryRecvError::Empty => {
+                            println!("Finished processing messages");
+                            break;
+                        }
+                    },
+                };
+                println!("Received user {user} in queue");
+                let user_link = get_user_link(user);
+                let _user_info = get_user_info(&c, &user_link, &config).await?;
+                let _posts = get_recent_posts_from_user(&c, &user_link, &config).await?;
+            }
+            c.close().await?;
+            Ok::<(), Report>(())
+        });
+        tasks.push(handle);
+    }
+    for task in tasks {
+        let task = task.await?;
+        if let Err(e) = task {
+            println!("Task encountered an error: {e}",);
+        }
     }
 
     Ok(())
@@ -189,8 +252,9 @@ async fn main() -> Result<()> {
     let config = Config::get().wrap_err("Failed getting config")?;
 
     let pool = DriverPool::new(&config.driver_config).wrap_err("Failed creating pool")?;
+    let pool = Arc::new(pool);
 
-    if let e @ Err(_) = run(&pool, &config).await {
+    if let e @ Err(_) = run(Arc::clone(&pool), config).await {
         pool.close().await.wrap_err("Failed closing drivers")?;
         return e;
     } else {
