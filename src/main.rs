@@ -7,7 +7,7 @@ use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod client;
@@ -27,11 +27,13 @@ fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
 }
 
 struct FetchedUser {
-    _name: String,
-    _user_id: String,
+    _display_name: String,
+    _username: String,
     _description: String,
     _pfp_url: String,
     _banner_url: String,
+    _following: usize,
+    _followers: usize,
 }
 
 async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
@@ -43,31 +45,88 @@ async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
         Err(CmdError::NoSuchElement(_)) => {}
         Err(e) => return Err(e.into()),
     };
+    sleep_secs(4).await;
 
     Ok(())
 }
 
-async fn get_user_info(c: &Client, user_link: &str, config: &Config) -> Result<FetchedUser> {
-    goto_user_profile(c, user_link).await?;
-    let doc = Html::parse_document(&c.source().await?);
-    let span_selector = &Selector::parse("span").unwrap();
+fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize>, Option<usize>)> {
     let div_selector = &Selector::parse("div").unwrap();
-    let userinfo_classes = config.twitter_config.css_class("user_info")?;
-    let username_classes = config.twitter_config.css_class("user_name")?;
+    let anchor_selector = &Selector::parse("a").unwrap();
     let username_div = doc
         .select(div_selector)
-        .filter(|d| has_classes(*d, &userinfo_classes))
         .filter(|d| {
-            debug!("Found a div with userinfo class");
             d.value()
                 .attr("data-testid")
                 .map(|s| s == "UserName")
                 .unwrap_or(false)
-        });
+        })
+        .next()
+        .ok_or(eyre!("Failed to find username"))?;
 
-    for div in username_div {
-        println!("{}", div.text().collect::<String>());
-    }
+    let text = username_div.text().collect::<String>();
+    let mut iter = text.split('@').map(|s| s.trim().to_owned());
+    let display_name = iter
+        .next()
+        .ok_or(eyre!("Failed to find user display name"))?;
+    let username = iter.next().ok_or(eyre!("Failed to find username"))?;
+
+    let description_div = doc
+        .select(div_selector)
+        .filter(|d| {
+            d.value()
+                .attr("data-testid")
+                .map(|s| s == "UserDescription")
+                .unwrap_or(false)
+        })
+        .next()
+        .ok_or(eyre!("Failed to find user description"))?;
+
+    let description = description_div.text().collect::<String>();
+
+    let mut following_anchor = doc.select(anchor_selector).filter(|a| a.value().attr("href").map(|s| s.contains("following")).unwrap_or(false));
+    let a = following_anchor.next().ok_or(eyre!("No element with link `following` to extract following count"))?;
+    let text = a.text().collect::<String>();
+    let following = text.split_whitespace().next().ok_or(eyre!("Failed to find following count"))?;
+    // If the count is big enough, it truncates the count and displays it abbreviated.
+    // i.e. 200_000 = 200K
+    let following = if following.contains(|c| c == 'K' || c == 'M') {
+        None
+    } else {
+        let n = following.parse().wrap_err("Failed parsing following count")?;
+        Some(n)
+    };
+
+    let mut followers_anchor = doc.select(anchor_selector).filter(|a| a.value().attr("href").map(|s| s.contains("followers")).unwrap_or(false));
+    let a = followers_anchor.next().ok_or(eyre!("No element with link `follower` to extract followers count"))?;
+    let text = a.text().collect::<String>();
+    let followers = text.split_whitespace().next().ok_or(eyre!("Failed to find following count"))?;
+    // Same here
+    let followers = if followers.contains(|c| c == 'K' || c == 'M') {
+        None
+    } else {
+        let n = followers.parse().wrap_err("Failed parsing followers count")?;
+        Some(n)
+    };
+    debug!(following);
+    debug!(followers);
+
+    Ok((display_name, username, description, following, followers))
+}
+
+async fn get_user_info(c: &Client, user_link: &str, _config: &Config) -> Result<FetchedUser> {
+    // TODO: Retry maybe?
+    goto_user_profile(c, user_link).await?;
+
+    let doc = Html::parse_document(&c.source().await?);
+    // This is a workaround for an issue that occurs when the divs are in the same scope as the
+    // below await call.
+    // Since they use `Cell`s, they are not Send, and the compiler complains execution may stop
+    // while they are still in scope. However, we know that after this point they are out of
+    // scope. Despite this, the compiler doesn't realise, and this is the workaround.
+    let (_display_name, _username, _description, _following, _followers) = get_user_info_impl(doc)?;
+
+    c.find(Locator::XPath("/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div[3]/div/div/div/div/div[1]/div[1]")).await?;
 
     bail!("TODO: Getting user info not implemented yet")
 }
@@ -267,7 +326,13 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
                 };
                 debug!("Received user {user} in task {id}");
                 let user_link = get_user_link(&user);
-                let _user_info = get_user_info(&c, &user_link, &config).await?;
+                let _user_info = match get_user_info(&c, &user_link, &config).await {
+                    Ok(u) => u,
+                    Err(e) => {
+                        warn!("Encountered error while fetching user info for {user}: {e}");
+                        continue;
+                    }
+                };
                 let _posts = get_recent_posts_from_user(&c, &user_link, &config).await?;
             }
             c.close().await?;
