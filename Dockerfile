@@ -44,4 +44,6 @@ FROM debian:bookworm-20231009-slim
 WORKDIR /app
 COPY --from=build /app/target/release/twitarc .
 
+ENV TWITARC_DATA="/data"
+
 ENTRYPOINT ["/app/twitarc"]

@@ -62,8 +62,8 @@ impl Config {
     pub fn get() -> Result<Self> {
         #[derive(Parser, Debug)]
         struct CliConfig {
-            #[arg(short, long, default_value = "config.toml")]
-            config_path: String,
+            #[arg(short, long)]
+            config_path: Option<String>,
 
             #[arg(short, long)]
             username: Option<String>,
@@ -74,7 +74,16 @@ impl Config {
 
         let cli_config = CliConfig::parse();
 
-        let config_path = cli_config.config_path;
+        let config_path = if let Some(path) = cli_config.config_path {
+            path
+        } else if let Some(path) = env::var("TWITARC_CONFIG").ok() {
+            path
+        } else if let Some(path) = env::var("TWITARC_DATA").ok() {
+            format!("{path}/config.toml")
+        } else {
+            "config.toml".to_owned()
+        };
+
         let mut config = vec![];
         std::fs::File::open(config_path)
             .wrap_err("Could not open config file")?
