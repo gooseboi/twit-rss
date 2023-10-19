@@ -2,14 +2,13 @@ use color_eyre::{
     eyre::{bail, eyre, Context, Result},
     Report,
 };
-use fantoccini::{Client, Locator, error::CmdError};
+use fantoccini::{error::CmdError, Client, Locator};
 use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::sync::Arc;
 use tracing::{debug, error, info};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod client;
 mod config;
@@ -238,7 +237,10 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
     }
 
     let mut tasks = vec![];
-    info!("Starting {} tasks to fetch users", config.fetch_config.max_concurrent_users);
+    info!(
+        "Starting {} tasks to fetch users",
+        config.fetch_config.max_concurrent_users
+    );
     for i in 0..config.fetch_config.max_concurrent_users {
         let user_rx = rxs.pop().unwrap();
         let pool = Arc::clone(&pool);
