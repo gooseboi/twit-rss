@@ -55,13 +55,12 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
     let anchor_selector = &Selector::parse("a").unwrap();
     let username_div = doc
         .select(div_selector)
-        .filter(|d| {
+        .find(|d| {
             d.value()
                 .attr("data-testid")
                 .map(|s| s == "UserName")
                 .unwrap_or(false)
         })
-        .next()
         .ok_or(eyre!("Failed to find username"))?;
 
     let text = username_div.text().collect::<String>();
@@ -73,39 +72,62 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
 
     let description_div = doc
         .select(div_selector)
-        .filter(|d| {
+        .find(|d| {
             d.value()
                 .attr("data-testid")
                 .map(|s| s == "UserDescription")
                 .unwrap_or(false)
         })
-        .next()
         .ok_or(eyre!("Failed to find user description"))?;
 
     let description = description_div.text().collect::<String>();
 
-    let mut following_anchor = doc.select(anchor_selector).filter(|a| a.value().attr("href").map(|s| s.contains("following")).unwrap_or(false));
-    let a = following_anchor.next().ok_or(eyre!("No element with link `following` to extract following count"))?;
+    let mut following_anchor = doc.select(anchor_selector).filter(|a| {
+        a.value()
+            .attr("href")
+            .map(|s| s.contains("following"))
+            .unwrap_or(false)
+    });
+    let a = following_anchor.next().ok_or(eyre!(
+        "No element with link `following` to extract following count"
+    ))?;
     let text = a.text().collect::<String>();
-    let following = text.split_whitespace().next().ok_or(eyre!("Failed to find following count"))?;
+    let following = text
+        .split_whitespace()
+        .next()
+        .ok_or(eyre!("Failed to find following count"))?;
     // If the count is big enough, it truncates the count and displays it abbreviated.
     // i.e. 200_000 = 200K
     let following = if following.contains(|c| c == 'K' || c == 'M') {
         None
     } else {
-        let n = following.parse().wrap_err("Failed parsing following count")?;
+        let n = following
+            .parse()
+            .wrap_err("Failed parsing following count")?;
         Some(n)
     };
 
-    let mut followers_anchor = doc.select(anchor_selector).filter(|a| a.value().attr("href").map(|s| s.contains("followers")).unwrap_or(false));
-    let a = followers_anchor.next().ok_or(eyre!("No element with link `follower` to extract followers count"))?;
+    let mut followers_anchor = doc.select(anchor_selector).filter(|a| {
+        a.value()
+            .attr("href")
+            .map(|s| s.contains("followers"))
+            .unwrap_or(false)
+    });
+    let a = followers_anchor.next().ok_or(eyre!(
+        "No element with link `follower` to extract followers count"
+    ))?;
     let text = a.text().collect::<String>();
-    let followers = text.split_whitespace().next().ok_or(eyre!("Failed to find following count"))?;
+    let followers = text
+        .split_whitespace()
+        .next()
+        .ok_or(eyre!("Failed to find following count"))?;
     // Same here
     let followers = if followers.contains(|c| c == 'K' || c == 'M') {
         None
     } else {
-        let n = followers.parse().wrap_err("Failed parsing followers count")?;
+        let n = followers
+            .parse()
+            .wrap_err("Failed parsing followers count")?;
         Some(n)
     };
     debug!(following);
@@ -162,7 +184,7 @@ async fn get_recent_posts_from_user(c: &Client, user_id: &str, config: &Config) 
     };
     debug!("Downloading data for {username}");
 
-    let re = Regex::new(&format!("^/\\w+/status/\\d+$")).unwrap();
+    let re = Regex::new("^/\\w+/status/\\d+$").unwrap();
     let anchor_selector = &Selector::parse("a").unwrap();
     let article_selector = &Selector::parse("article").unwrap();
     let user_status_format = &format!("/{user_id}");

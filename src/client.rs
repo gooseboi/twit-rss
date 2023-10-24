@@ -87,9 +87,7 @@ pub async fn set_auth_cookie(c: &Client, config: &TwitterConfig) -> Result<()> {
             .open(&config.auth_cache_fname)
             .await
             .unwrap();
-        f.write_all(cookie.to_string().as_str().as_bytes())
-            .await
-            .unwrap();
+        f.write_all(cookie.to_string().as_bytes()).await.unwrap();
         info!("Successfully fetched and cached auth from site");
     }
     Ok(())

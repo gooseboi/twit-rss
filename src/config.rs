@@ -76,9 +76,9 @@ impl Config {
 
         let config_path = if let Some(path) = cli_config.config_path {
             path
-        } else if let Some(path) = env::var("TWITARC_CONFIG").ok() {
+        } else if let Ok(path) = env::var("TWITARC_CONFIG") {
             path
-        } else if let Some(path) = env::var("TWITARC_DATA").ok() {
+        } else if let Ok(path) = env::var("TWITARC_DATA") {
             format!("{path}/config.toml")
         } else {
             "config.toml".to_owned()
