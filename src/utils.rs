@@ -17,3 +17,14 @@ pub fn get_post_full_link(link: &str) -> String {
         format!("https://twitter.com{link}")
     }
 }
+
+pub fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
+    classes.iter().all(|class| {
+        e.value()
+            .has_class(class, scraper::CaseSensitivity::AsciiCaseInsensitive)
+    })
+}
+
+pub fn get_user_link(username: &str) -> String {
+    format!("https://twitter.com/{username}")
+}
