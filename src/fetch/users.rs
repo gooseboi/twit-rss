@@ -293,41 +293,72 @@ async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
     Ok(())
 }
 
+fn get_banner_url_impl(doc: Html) -> Result<String> {
+    let img_selector = &Selector::parse("img").unwrap();
+    doc.select(img_selector)
+        .find(|i| i.value().attr("alt").map(|s| s == "Image").unwrap_or(false))
+        .ok_or(eyre!("Failed to find banner in page"))
+        .map(|i| i.value().attr("src").ok_or(eyre!("Image had no src attr")))
+        .and_then(|v| v)
+        .map(|s| s.to_owned())
+}
+
+async fn get_banner_url(c: &Client, user_link: &str, config: &Config) -> Result<String> {
+    // Click on the banner
+    c.find(Locator::XPath(config.twitter_config.xpath("banner_img")?)).await?.click().await?;
+    sleep_secs(5).await;
+
+    let doc = c.source().await?;
+    let doc = Html::parse_document(&doc);
+    let res = get_banner_url_impl(doc);
+    // Exit out
+    match c.find(Locator::XPath(config.twitter_config.xpath("banner_exit")?)).await {
+        Ok(e) => e.click().await?,
+        Err(CmdError::NoSuchElement(_)) => goto_user_profile(c, user_link).await?,
+        Err(e) => return Err(e.into()),
+    }
+    res
+}
+
 pub async fn get_user_info(
     c: &Client,
     user: &str,
     user_link: &str,
-    _config: &Config,
+    config: &Config,
 ) -> Result<FetchedUser> {
     // TODO: Retry maybe?
     goto_user_profile(c, user_link).await?;
 
-    {
-        let span = span!(Level::INFO, "info_from_json");
-        let doc = Html::parse_document(&c.source().await?);
-        if let Some(_) = json::try_get_info_from_json(span, doc) {
-            info!("Got user info for {user} from json");
-            bail!("Cannot convert from json info to FetchedUser yet");
-        } else {
-            warn!("Failed getting user info for {user} from json");
-        }
+    let span = span!(Level::INFO, "info_from_json");
+    let doc = Html::parse_document(&c.source().await?);
+    if let Some(u) = json::try_get_info_from_json(span, doc) {
+        info!("Got user info for {user} from json");
+        let banner_url = get_banner_url(c, user_link, config).await.wrap_err("Failed getting banner_url")?;
+        info!("Got banner_url for {user} after json");
+        return Ok(FetchedUser {
+            display_name: u.display_name,
+            username: u.username,
+            description: u.description,
+            date_created: u.date_created,
+            related_link: u.related_link,
+            location: u.location,
+            following: u.following,
+            followers: u.followers,
+            pfp_url: u.pfp_url,
+            banner_url,
+        });
+    } else {
+        warn!("Failed getting user info for {user} from json");
     }
+    let _ = span;
+
     // This is a workaround for an issue that occurs when the divs are in the same scope as the
     // below await call.
     // Since they use `Cell`s, they are not Send, and the compiler complains execution may stop
     // while they are still in scope. However, we know that after this point they are out of
     // scope. Despite this, the compiler doesn't realise, and this is the workaround.
     let doc = Html::parse_document(&c.source().await?);
-    let page::PageUserInfo {
-        display_name: _,
-        username: _,
-        description: _,
-        following: _,
-        followers: _,
-        date_created: _,
-        related_link: _,
-        location: _,
-    } = page::try_get_info_from_page(user, doc)?;
+    let _page_user_info = page::try_get_info_from_page(user, doc)?;
 
     c.find(Locator::XPath("/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div[3]/div/div/div/div/div[1]/div[1]")).await?;
 

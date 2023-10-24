@@ -86,7 +86,7 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
                 let user_info = match get_user_info(&c, &user, &user_link, &config).await {
                     Ok(u) => u,
                     Err(e) => {
-                        warn!("Encountered error while fetching user info for {user}: {e}");
+                        warn!("Encountered error while fetching user info for {user}: {e:#}");
                         continue;
                     }
                 };
@@ -101,7 +101,7 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
     for task in tasks {
         let task = task.await?;
         if let Err(e) = task {
-            error!("Task encountered an error: {e}",);
+            error!("Task encountered an error: {e:#}",);
         }
     }
 

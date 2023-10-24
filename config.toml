@@ -44,4 +44,4 @@ user_name = ["css-1dbjc4n", "r-6gpygo", "r-14gqq1x"]
 
 [twitter.xpaths]
 banner_img = "/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div/div/div/div/a/div/div[2]/div/img"
-banner_exit = "/html/body/div[1]/div/div/div[2]/main/div/div[2]/div/div/svg"
+banner_exit = "/html/body/div[1]/div/div/div[1]/div[2]/div/div/div/div/div/div[2]/div[2]/div[2]/div/div"
