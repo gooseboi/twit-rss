@@ -1,4 +1,4 @@
-FROM debian:bookworm-20231009-slim as build
+FROM debian:bookworm-20231009-slim as rust_builder
 
 # Install curl and deps
 RUN set -eux; \
@@ -15,22 +15,23 @@ RUN set -eux; \
 			"https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init" \
 			--output /rustup-init; \
 		chmod +x /rustup-init; \
-		/rustup-init -y --no-modify-path; \
+		/rustup-init -y --no-modify-path --profile minimal --no-update-default-toolchain; \
 		rm /rustup-init;
 
+WORKDIR /temp/rustup
+COPY rust-toolchain.toml ./
 # Add rustup to path, check that it works, and set profile to minimal
 ENV PATH=${PATH}:/root/.cargo/bin
 RUN set -eux; \
 		rustup --version; \
-		rustup set profile minimal;
+		cargo; # This reads from rust-toolchain.toml
 
 # Copy sources and build them
 WORKDIR /app
 COPY src src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 
-RUN --mount=type=cache,target=/root/.rustup \
-    --mount=type=cache,target=/root/.cargo/registry \
+RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
 	set -eux; \
 	cargo build --release
@@ -92,7 +93,7 @@ COPY --from=firefox_builder /root/firefox ./firefox
 ENV PATH="/root/firefox:$PATH"
 
 WORKDIR /app
-COPY --from=build /app/target/release/twitarc .
+COPY --from=rust_builder /app/target/release/twitarc .
 
 ENV TWITARC_DATA="/data"
 
