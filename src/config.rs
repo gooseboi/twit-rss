@@ -26,6 +26,7 @@ pub struct TwitterConfig {
     username: Option<String>,
     password: Option<String>,
     css_classes: HashMap<String, Vec<String>>,
+    xpaths: HashMap<String, String>,
 }
 
 impl TwitterConfig {
@@ -45,6 +46,14 @@ impl TwitterConfig {
             .iter()
             .map(|s| s.as_str())
             .collect())
+    }
+
+    pub fn xpath(&self, name: &str) -> Result<&str> {
+        self
+            .xpaths
+            .get(name)
+            .ok_or(eyre!("CSS class not in config"))
+            .map(|s| s.as_str())
     }
 }
 

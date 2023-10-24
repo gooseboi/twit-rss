@@ -41,3 +41,7 @@ following_users = ["css-4rbku5", "css-18t94o4", "r-1loqt21", "r-1wbh5a2"]
 user_info = ["css-1dbjc4n", "r-1ifxtd0", "r-ymttw5", "r-ttdzmv"]
 user_description = ["css-1dbjc4n", "r-1adg3ll", "r-6gpygo"]
 user_name = ["css-1dbjc4n", "r-6gpygo", "r-14gqq1x"]
+
+[twitter.xpaths]
+banner_img = "/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div/div/div/div/a/div/div[2]/div/img"
+banner_exit = "/html/body/div[1]/div/div/div[2]/main/div/div[2]/div/div/svg"
