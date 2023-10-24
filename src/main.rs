@@ -7,7 +7,7 @@ use indexmap::IndexSet;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, span, warn, Level, Span};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod client;
@@ -26,14 +26,28 @@ fn has_classes(e: scraper::ElementRef, classes: &[&str]) -> bool {
     })
 }
 
+#[derive(Debug, Clone)]
+struct UserImgs {
+    pfp_url: String,
+    banner_url: String,
+}
+
+#[derive(Debug, Clone)]
+struct UserInfo {
+    display_name: String,
+    username: String,
+    description: String,
+    date_created: String,
+    related_link: Option<String>,
+    location: Option<String>,
+    following: usize,
+    followers: usize,
+}
+
+#[derive(Debug, Clone)]
 struct FetchedUser {
-    _display_name: String,
-    _username: String,
-    _description: String,
-    _pfp_url: String,
-    _banner_url: String,
-    _following: usize,
-    _followers: usize,
+    imgs: UserImgs,
+    info: UserInfo,
 }
 
 async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
@@ -50,7 +64,149 @@ async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
     Ok(())
 }
 
-fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize>, Option<usize>)> {
+fn try_get_info_from_json(span: Span, doc: Html) -> Option<FetchedUser> {
+    let _enter = span.enter();
+    let script_selector = &Selector::parse("script").unwrap();
+
+    let s = doc.select(script_selector).find(|s| {
+        s.value()
+            .attr("type")
+            .map(|t| t == "application/ld+json")
+            .unwrap_or(false)
+            && s.value()
+                .attr("data-testid")
+                .map(|d| d == "UserProfileSchema-test")
+                .unwrap_or(false)
+    })?;
+
+    let json = s.text().collect::<String>();
+    let parsed_json: serde_json::Value = serde_json::from_str(&json).ok()?;
+    let map = parsed_json.as_object()?;
+
+    let date_created = map.get("dateCreated")?.as_str()?.to_owned();
+    debug!(date_created);
+
+    let related_link = map
+        .get("relatedLink")
+        .and_then(|v| v.as_array())
+        .and_then(|v| {
+            let e = v.get(1);
+            if e.is_none() {
+                warn!("Failed getting related link from array {v:#?}");
+            };
+            e
+        })
+        .and_then(|s| {
+            if s.as_str().is_none() {
+                warn!("relatedLink value was not a string (What?): {s}");
+            };
+            s.as_str()
+        })
+        .map(|s| s.to_owned());
+    debug!(?related_link);
+
+    let author = map.get("author").and_then(|m| m.as_object())?;
+
+    let display_name = author
+        .get("givenName")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_owned())?;
+    debug!(display_name);
+
+    let username = author
+        .get("additionalName")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_owned())?;
+    debug!(username);
+
+    let description = author
+        .get("description")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_owned())?;
+    debug!(description);
+
+    let location = author
+        .get("homeLocation")
+        .and_then(|h| h.as_object())
+        .and_then(|m| {
+            if m.get("@type").map(|ty| ty != "Place").unwrap_or(false) {
+                warn!(
+                    "homeLocation.type is not `Place`: `{ty}`",
+                    ty = m.get("@type").unwrap()
+                );
+                None
+            } else {
+                m.get("name")
+            }
+        })
+        .and_then(|p| p.as_str().map(|s| s.to_owned()))
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    debug!(?location);
+
+    let Some(interactions) = author
+        .get("interactionStatistic")
+        .and_then(|m| m.as_array())
+    else {
+        warn!("No interactions");
+        return None;
+    };
+
+    let followers = interactions
+        .iter()
+        .map(|item| item.as_object())
+        .find(|map| {
+            map.and_then(|map| map.get("name").map(|s| s == "Follows"))
+                .unwrap_or(false)
+        })
+        .flatten()
+        .and_then(|m| m.get("userInteractionCount"))
+        .and_then(|v| v.as_u64())? as usize;
+    debug!(followers);
+
+    let following = interactions
+        .iter()
+        .map(|item| item.as_object())
+        .find(|map| {
+            map.and_then(|map| map.get("name").map(|s| s == "Friends"))
+                .unwrap_or(false)
+        })
+        .flatten()
+        .and_then(|m| m.get("userInteractionCount"))
+        .and_then(|v| v.as_u64())? as usize;
+    debug!(following);
+
+    let image = author.get("image").and_then(|m| m.as_object())?;
+
+    let pfp_url = image
+        .get("contentUrl")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_owned())?;
+    debug!(pfp_url);
+
+    warn!("TODO: Fetching banner url");
+    return None;
+
+    let user = FetchedUser {
+        imgs: UserImgs {
+            pfp_url,
+            banner_url: String::new(),
+        },
+        info: UserInfo {
+            display_name,
+            username,
+            description,
+            date_created,
+            related_link,
+            location,
+            following,
+            followers,
+        },
+    };
+
+    Some(user)
+}
+
+fn try_get_info_from_page(_user: &str, doc: Html) -> Result<UserInfo> {
     let div_selector = &Selector::parse("div").unwrap();
     let anchor_selector = &Selector::parse("a").unwrap();
     let username_div = doc
@@ -65,10 +221,10 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
 
     let text = username_div.text().collect::<String>();
     let mut iter = text.split('@').map(|s| s.trim().to_owned());
-    let display_name = iter
+    let _display_name = iter
         .next()
         .ok_or(eyre!("Failed to find user display name"))?;
-    let username = iter.next().ok_or(eyre!("Failed to find username"))?;
+    let _username = iter.next().ok_or(eyre!("Failed to find username"))?;
 
     let description_div = doc
         .select(div_selector)
@@ -80,7 +236,7 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
         })
         .ok_or(eyre!("Failed to find user description"))?;
 
-    let description = description_div.text().collect::<String>();
+    let _description = description_div.text().collect::<String>();
 
     let mut following_anchor = doc.select(anchor_selector).filter(|a| {
         a.value()
@@ -98,7 +254,7 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
         .ok_or(eyre!("Failed to find following count"))?;
     // If the count is big enough, it truncates the count and displays it abbreviated.
     // i.e. 200_000 = 200K
-    let following = if following.contains(|c| c == 'K' || c == 'M') {
+    let _following: Option<usize> = if following.contains(|c| c == 'K' || c == 'M') {
         None
     } else {
         let n = following
@@ -120,9 +276,9 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
     let followers = text
         .split_whitespace()
         .next()
-        .ok_or(eyre!("Failed to find following count"))?;
+        .ok_or(eyre!("Failed to find followers count"))?;
     // Same here
-    let followers = if followers.contains(|c| c == 'K' || c == 'M') {
+    let _followers: Option<usize> = if followers.contains(|c| c == 'K' || c == 'M') {
         None
     } else {
         let n = followers
@@ -130,23 +286,47 @@ fn get_user_info_impl(doc: Html) -> Result<(String, String, String, Option<usize
             .wrap_err("Failed parsing followers count")?;
         Some(n)
     };
-    debug!(following);
-    debug!(followers);
+    debug!(_following);
+    debug!(_followers);
 
-    Ok((display_name, username, description, following, followers))
+    bail!("TODO: Unimplemented")
 }
 
-async fn get_user_info(c: &Client, user_link: &str, _config: &Config) -> Result<FetchedUser> {
+async fn get_user_info(
+    c: &Client,
+    user: &str,
+    user_link: &str,
+    _config: &Config,
+) -> Result<FetchedUser> {
     // TODO: Retry maybe?
     goto_user_profile(c, user_link).await?;
 
-    let doc = Html::parse_document(&c.source().await?);
+    {
+        let span = span!(Level::INFO, "info_from_json");
+        let doc = Html::parse_document(&c.source().await?);
+        if let Some(t) = try_get_info_from_json(span, doc) {
+            info!("Got user info for {user} from json");
+            return Ok(t);
+        } else {
+            warn!("Failed getting user info for {user} from json");
+        }
+    }
     // This is a workaround for an issue that occurs when the divs are in the same scope as the
     // below await call.
     // Since they use `Cell`s, they are not Send, and the compiler complains execution may stop
     // while they are still in scope. However, we know that after this point they are out of
     // scope. Despite this, the compiler doesn't realise, and this is the workaround.
-    let (_display_name, _username, _description, _following, _followers) = get_user_info_impl(doc)?;
+    let doc = Html::parse_document(&c.source().await?);
+    let UserInfo {
+        display_name: _,
+        username: _,
+        description: _,
+        following: _,
+        followers: _,
+        date_created: _,
+        related_link: _,
+        location: _,
+    } = try_get_info_from_page(user, doc)?;
 
     c.find(Locator::XPath("/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div[3]/div/div/div/div/div[1]/div[1]")).await?;
 
@@ -348,14 +528,15 @@ async fn run(pool: Arc<DriverPool>, config: Config) -> Result<()> {
                 };
                 debug!("Received user {user} in task {id}");
                 let user_link = get_user_link(&user);
-                let _user_info = match get_user_info(&c, &user_link, &config).await {
+                let user_info = match get_user_info(&c, &user, &user_link, &config).await {
                     Ok(u) => u,
                     Err(e) => {
                         warn!("Encountered error while fetching user info for {user}: {e}");
                         continue;
                     }
                 };
-                let _posts = get_recent_posts_from_user(&c, &user_link, &config).await?;
+                info!("{user_info:#?}");
+                //let _posts = get_recent_posts_from_user(&c, &user_link, &config).await?;
             }
             c.close().await?;
             Ok::<(), Report>(())
