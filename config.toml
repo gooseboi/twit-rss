@@ -30,6 +30,8 @@ fetch_username = "gooseiman"
 # retried when there is no change
 max_retries = 5
 
+users_from_following_retry_delay = 1
+
 # Twitter conf
 [twitter]
 # Filename for caching the auth cookie for twitter

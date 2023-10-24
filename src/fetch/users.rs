@@ -380,7 +380,7 @@ pub async fn get_users_from_following(c: &Client, config: &Config) -> Result<Vec
     let max_retries = config.fetch_config.max_retries;
     while retries < max_retries {
         c.execute("window.scrollBy(0,100);", vec![]).await?;
-        sleep_secs(1 * (retries + 1)).await;
+        sleep_secs(config.fetch_config.users_from_following_retry_delay * (retries + 1)).await;
         if retries != 0 {
             info!("{retries}/{max_retries} retries at fetching users from following");
         }

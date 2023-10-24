@@ -10,6 +10,7 @@ pub struct FetchConfig {
     pub max_sessions_per_user: usize,
     pub fetch_username: String,
     pub max_retries: usize,
+    pub users_from_following_retry_delay: usize,
 }
 
 #[derive(Deserialize, Debug)]
