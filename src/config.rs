@@ -42,7 +42,7 @@ impl TwitterConfig {
         Ok(self
             .css_classes
             .get(name)
-            .ok_or(eyre!("CSS class not in config"))?
+            .ok_or(eyre!("CSS class {name} not in config"))?
             .iter()
             .map(|s| s.as_str())
             .collect())
@@ -52,7 +52,7 @@ impl TwitterConfig {
         self
             .xpaths
             .get(name)
-            .ok_or(eyre!("CSS class not in config"))
+            .ok_or(eyre!("XPath {name} not in config"))
             .map(|s| s.as_str())
     }
 }
