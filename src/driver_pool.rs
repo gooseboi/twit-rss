@@ -33,7 +33,7 @@ impl DriverPool {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
-                .unwrap();
+                .wrap_err("Failed spawning geckodriver process")?;
             pool.push(PoolValue { driver, port });
         }
         let pool = Mutex::new(pool);
