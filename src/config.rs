@@ -50,8 +50,7 @@ impl TwitterConfig {
     }
 
     pub fn xpath(&self, name: &str) -> Result<&str> {
-        self
-            .xpaths
+        self.xpaths
             .get(name)
             .ok_or(eyre!("XPath {name} not in config"))
             .map(|s| s.as_str())

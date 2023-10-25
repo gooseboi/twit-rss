@@ -305,14 +305,20 @@ fn get_banner_url_impl(doc: Html) -> Result<String> {
 
 async fn get_banner_url(c: &Client, user_link: &str, config: &Config) -> Result<String> {
     // Click on the banner
-    c.find(Locator::XPath(config.twitter_config.xpath("banner_img")?)).await?.click().await?;
+    c.find(Locator::XPath(config.twitter_config.xpath("banner_img")?))
+        .await?
+        .click()
+        .await?;
     sleep_secs(5).await;
 
     let doc = c.source().await?;
     let doc = Html::parse_document(&doc);
     let res = get_banner_url_impl(doc);
     // Exit out
-    match c.find(Locator::XPath(config.twitter_config.xpath("banner_exit")?)).await {
+    match c
+        .find(Locator::XPath(config.twitter_config.xpath("banner_exit")?))
+        .await
+    {
         Ok(e) => e.click().await?,
         Err(CmdError::NoSuchElement(_)) => goto_user_profile(c, user_link).await?,
         Err(e) => return Err(e.into()),
@@ -333,7 +339,9 @@ pub async fn get_user_info(
     let doc = Html::parse_document(&c.source().await?);
     if let Some(u) = json::try_get_info_from_json(span, doc) {
         info!("Got user info for {user} from json");
-        let banner_url = get_banner_url(c, user_link, config).await.wrap_err("Failed getting banner_url")?;
+        let banner_url = get_banner_url(c, user_link, config)
+            .await
+            .wrap_err("Failed getting banner_url")?;
         info!("Got banner_url for {user} after json");
         return Ok(FetchedUser {
             display_name: u.display_name,
