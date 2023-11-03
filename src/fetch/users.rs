@@ -40,7 +40,8 @@ mod json {
         pub pfp_url: String,
     }
 
-    pub fn try_get_info_from_json(span: Span, doc: Html) -> Option<JsonFetchedUser> {
+    pub fn try_get_info_from_json(span: Span, src: &str) -> Option<JsonFetchedUser> {
+        let doc = Html::parse_document(src);
         let _enter = span.enter();
         let script_selector = &Selector::parse("script").unwrap();
 
@@ -190,7 +191,8 @@ mod page {
         pub followers: Option<usize>,
     }
 
-    pub fn try_get_info_from_page(_user: &str, doc: Html) -> Result<PageUserInfo> {
+    pub fn try_get_info_from_page(_user: &str, src: &str) -> Result<PageUserInfo> {
+        let doc = Html::parse_document(src);
         let div_selector = &Selector::parse("div").unwrap();
         let anchor_selector = &Selector::parse("a").unwrap();
         let username_div = doc
@@ -293,7 +295,8 @@ async fn goto_user_profile(c: &Client, user_link: &str) -> Result<()> {
     Ok(())
 }
 
-fn get_banner_url_impl(doc: Html) -> Result<String> {
+fn get_banner_url_impl(src: &str) -> Result<String> {
+    let doc = Html::parse_document(src);
     let img_selector = &Selector::parse("img").unwrap();
     doc.select(img_selector)
         .find(|i| i.value().attr("alt").map(|s| s == "Image").unwrap_or(false))
@@ -311,9 +314,8 @@ async fn get_banner_url(c: &Client, user_link: &str, config: &Config) -> Result<
         .await?;
     sleep_secs(5).await;
 
-    let doc = c.source().await?;
-    let doc = Html::parse_document(&doc);
-    let res = get_banner_url_impl(doc);
+    let src = c.source().await?;
+    let res = get_banner_url_impl(&src);
     // Exit out
     match c
         .find(Locator::XPath(config.twitter_config.xpath("banner_exit")?))
@@ -336,8 +338,8 @@ pub async fn get_user_info(
     goto_user_profile(c, user_link).await?;
 
     let span = span!(Level::INFO, "info_from_json");
-    let doc = Html::parse_document(&c.source().await?);
-    if let Some(u) = json::try_get_info_from_json(span, doc) {
+    let src = c.source().await?;
+    if let Some(u) = json::try_get_info_from_json(span, &src) {
         info!("Got user info for {user} from json");
         let banner_url = get_banner_url(c, user_link, config)
             .await
@@ -365,8 +367,8 @@ pub async fn get_user_info(
     // Since they use `Cell`s, they are not Send, and the compiler complains execution may stop
     // while they are still in scope. However, we know that after this point they are out of
     // scope. Despite this, the compiler doesn't realise, and this is the workaround.
-    let doc = Html::parse_document(&c.source().await?);
-    let _page_user_info = page::try_get_info_from_page(user, doc)?;
+    let src = c.source().await?;
+    let _page_user_info = page::try_get_info_from_page(user, &src)?;
 
     c.find(Locator::XPath("/html/body/div[1]/div/div/div[2]/main/div/div/div/div/div/div[3]/div/div/div/div/div[1]/div[1]")).await?;
 
